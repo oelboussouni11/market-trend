@@ -202,7 +202,7 @@ else:
             else:
                 st.info(f"The market is ranging from {start_date.date()} to {end_date.date()}.")
 
-# User Input for Lookback Days for the second graph
+
 # Trendline Analysis (data1.csv)
 st.header("Trendline Analysis (data1.csv)")
 lookback_days = st.number_input(
@@ -259,8 +259,11 @@ else:
                 alines=dict(alines=alines, colors=['green', 'red']),
                 style='charles',
                 title=f"Candlestick with Support and Resistance Trendlines from {start_date1.date()} to {end_date1.date()}",
+                figsize=(20, 12),  # Increase figure size for better visibility
                 returnfig=True
             )
 
-            # Display the plot in Streamlit
-            st.pyplot(fig)
+            # Use Streamlit's columns to center the graph
+            col1, col2, col3 = st.columns([0.5, 4, 0.5])  # Center the graph in the middle column
+            with col2:
+                st.pyplot(fig)
