@@ -4,15 +4,15 @@ import matplotlib.pyplot as plt
 import mplfinance as mpf
 import streamlit as st
 
-# Function to get the next available date
-def get_next_available_date(date, date_list):
+# Function to get the previous available date
+def get_previous_available_date(date, date_list):
     # Ensure that both date and date_list are of datetime type
     date_list = pd.to_datetime(date_list, errors='coerce')
     date = pd.to_datetime(date)
     date_list = date_list.dropna()  # Remove NaT values
     date_list_sorted = date_list.sort_values().reset_index(drop=True)
-    idx = date_list_sorted.searchsorted(date)
-    if idx < len(date_list_sorted):
+    idx = date_list_sorted.searchsorted(date, side='right') - 1
+    if idx >= 0 and idx < len(date_list_sorted):
         return date_list_sorted.iloc[idx]
     else:
         return None
@@ -113,7 +113,7 @@ data1 = data1.dropna(subset=['date'])  # Remove rows with invalid dates
 min_date = min(data['date'].min(), data1['date'].min())
 max_date = max(data['date'].max(), data1['date'].max())
 
-# User Input for Date and Lookback Period
+# User Input for Date
 selected_date = st.date_input(
     "Select a date",
     value=max_date.date(),
@@ -121,30 +121,25 @@ selected_date = st.date_input(
     max_value=max_date.date()
 )
 
-lookback_days = st.number_input(
-    "Enter the number of days to include before the chosen date",
-    min_value=1,
-    max_value=365,
-    value=31
-)
-
 selected_date = pd.to_datetime(selected_date)
 
-# Function to get the next available date in datasets
+# Function to get the previous available date in datasets
 dates_in_data = data['date']
 dates_in_data1 = data1['date']
 
-selected_date_in_data = get_next_available_date(selected_date, dates_in_data)
-selected_date_in_data1 = get_next_available_date(selected_date, dates_in_data1)
+selected_date_in_data = get_previous_available_date(selected_date, dates_in_data)
+selected_date_in_data1 = get_previous_available_date(selected_date, dates_in_data1)
 
 # Analysis on data.csv
 st.header("Linear Regression Analysis (data.csv)")
 if selected_date_in_data is None:
-    st.warning(f"No available date after {selected_date.date()} in data.csv")
+    st.warning(f"No available date before or on {selected_date.date()} in data.csv")
 else:
     selected_date_data = selected_date_in_data
-    start_date = selected_date_data - pd.Timedelta(days=lookback_days)
-    end_date = selected_date_data - pd.Timedelta(days=1)
+    # Always use a fixed lookback period of 31 days
+    lookback_days_first_graph = 31
+    start_date = selected_date_data - pd.Timedelta(days=lookback_days_first_graph-1)
+    end_date = selected_date_data
 
     # Filter data between start_date and end_date
     filtered_data = data[(data['date'] >= start_date) & (data['date'] <= end_date)]
@@ -201,13 +196,21 @@ else:
             else:
                 st.info(f"The market is ranging from {start_date.date()} to {end_date.date()}.")
 
-# Analysis on data1.csv
+# User Input for Lookback Days for the second graph
+# Trendline Analysis (data1.csv)
 st.header("Trendline Analysis (data1.csv)")
+lookback_days = st.number_input(
+    "Enter the number of days to include before the chosen date (for Trendline Analysis)",
+    min_value=1,
+    max_value=365,
+    value=31
+)
+
 if selected_date_in_data1 is None:
-    st.warning(f"No available date after {selected_date.date()} in data1.csv")
+    st.warning(f"No available date before or on {selected_date.date()} in data1.csv")
 else:
     selected_date_data1 = selected_date_in_data1
-    start_date1 = selected_date_data1 - pd.Timedelta(days=lookback_days)
+    start_date1 = selected_date_data1 - pd.Timedelta(days=lookback_days - 1)
     end_date1 = selected_date_data1
 
     # Filter data between start_date1 and end_date1
@@ -216,38 +219,42 @@ else:
     if data1_filtered.empty:
         st.warning(f"No data available from {start_date1.date()} to {end_date1.date()} in data1.csv.")
     else:
+        # Sort the data by date in ascending order
+        data1_filtered = data1_filtered.sort_values('date')
+
         # Prepare data
         data1_filtered = data1_filtered[['date', 'open', 'high', 'low', 'close']]
         data1_filtered = data1_filtered.set_index('date')
 
         # Ensure numerical data types
-        data1_filtered['open'] = data1_filtered['open'].astype(float)
-        data1_filtered['high'] = data1_filtered['high'].astype(float)
-        data1_filtered['low'] = data1_filtered['low'].astype(float)
-        data1_filtered['close'] = data1_filtered['close'].astype(float)
+        data1_filtered = data1_filtered.astype(float)
 
         # Trendline fitting and plotting
         candles = data1_filtered.copy()
 
-        support_coefs, resist_coefs = fit_trendlines(candles['high'], candles['low'], candles['close'])
-        support_line = support_coefs[0] * np.arange(len(candles)) + support_coefs[1]
-        resist_line = resist_coefs[0] * np.arange(len(candles)) + resist_coefs[1]
+        # Ensure there are enough data points for trendline calculation
+        if len(candles) < 2:
+            st.warning(f"Not enough data to compute trendlines from {start_date1.date()} to {end_date1.date()}.")
+        else:
+            support_coefs, resist_coefs = fit_trendlines(candles['high'], candles['low'], candles['close'])
+            support_line = support_coefs[0] * np.arange(len(candles)) + support_coefs[1]
+            resist_line = resist_coefs[0] * np.arange(len(candles)) + resist_coefs[1]
 
-        # Prepare trendlines for plotting
-        alines = [
-            [(candles.index[i], support_line[i]) for i in range(len(candles))],
-            [(candles.index[i], resist_line[i]) for i in range(len(candles))]
-        ]
+            # Prepare trendlines for plotting
+            alines = [
+                [(candles.index[i], support_line[i]) for i in range(len(candles))],
+                [(candles.index[i], resist_line[i]) for i in range(len(candles))]
+            ]
 
-        # Plot the candlestick chart with trendlines
-        fig, axlist = mpf.plot(
-            candles,
-            type='candle',
-            alines=dict(alines=alines, colors=['green', 'red']),
-            style='charles',
-            title=f"Candlestick with Support and Resistance Trendlines from {start_date1.date()} to {end_date1.date()}",
-            returnfig=True
-        )
+            # Plot the candlestick chart with trendlines
+            fig, axlist = mpf.plot(
+                candles,
+                type='candle',
+                alines=dict(alines=alines, colors=['green', 'red']),
+                style='charles',
+                title=f"Candlestick with Support and Resistance Trendlines from {start_date1.date()} to {end_date1.date()}",
+                returnfig=True
+            )
 
-        # Display the plot in Streamlit
-        st.pyplot(fig)
+            # Display the plot in Streamlit
+            st.pyplot(fig)
