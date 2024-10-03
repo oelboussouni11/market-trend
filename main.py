@@ -3,10 +3,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 import streamlit as st
+import random
 
 # Function to get the previous available date
 def get_previous_available_date(date, date_list):
-    # Ensure that both date and date_list are of datetime type
     date_list = pd.to_datetime(date_list, errors='coerce')
     date = pd.to_datetime(date)
     date_list = date_list.dropna()  # Remove NaT values
@@ -121,6 +121,12 @@ selected_date = st.date_input(
     max_value=max_date.date()
 )
 
+# Add a button to select a random date
+if st.button("Select Random Date"):
+    random_date = pd.to_datetime(np.random.choice(pd.date_range(min_date, max_date).date))
+    selected_date = random_date
+    st.write(f"Random date selected: {selected_date.date()}")
+
 selected_date = pd.to_datetime(selected_date)
 
 # Function to get the previous available date in datasets
@@ -203,7 +209,7 @@ lookback_days = st.number_input(
     "Enter the number of days to include before the chosen date (for Trendline Analysis)",
     min_value=1,
     max_value=365,
-    value=31
+    value=60
 )
 
 if selected_date_in_data1 is None:
