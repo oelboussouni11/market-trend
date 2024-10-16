@@ -154,7 +154,7 @@ else:
         "Enter the number of days to include before the chosen date (for Trendline Analysis)",
         min_value=1,
         max_value=365,
-        value=61,
+        value=31,
         key="lookback_days"
     )
     start_date1 = selected_date_data1 - pd.Timedelta(days=lookback_days - 1)
