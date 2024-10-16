@@ -3,7 +3,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 import streamlit as st
-import random
 
 # Function to get the previous available date
 def get_previous_available_date(date, date_list):
@@ -17,113 +16,47 @@ def get_previous_available_date(date, date_list):
     else:
         return None
 
-# Function to check the trend line
-def check_trend_line(support: bool, pivot: int, slope: float, y: pd.Series):
-    intercept = -slope * pivot + y.iloc[pivot]
-    line_vals = slope * np.arange(len(y)) + intercept
-    diffs = line_vals - y.values
-
-    if support and diffs.max() > 1e-5:
-        return -1.0
-    elif not support and diffs.min() < -1e-5:
-        return -1.0
-
-    err = (diffs ** 2.0).sum()
-    return err
-
-# Function to optimize the slope
-def optimize_slope(support: bool, pivot: int, init_slope: float, y: pd.Series):
-    slope_unit = (y.max() - y.min()) / len(y)
-    opt_step = 1.0
-    min_step = 0.0001
-    curr_step = opt_step
-    best_slope = init_slope
-
-    best_err = check_trend_line(support, pivot, init_slope, y)
-    if best_err < 0:
-        best_err = 0  # Set error to zero if negative
-
-    get_derivative = True
-    derivative = None
-    attempts = 0  # Track the number of iterations
-
-    while curr_step > min_step:
-        if get_derivative:
-            slope_change = best_slope + slope_unit * min_step
-            test_err = check_trend_line(support, pivot, slope_change, y)
-            derivative = test_err - best_err
-
-            if test_err < 0.0:
-                slope_change = best_slope - slope_unit * min_step
-                test_err = check_trend_line(support, pivot, slope_change, y)
-                derivative = best_err - test_err
-
-            if test_err < 0.0:
-                break  # Exit the loop
-
-            get_derivative = False
-
-        if derivative > 0.0:
-            test_slope = best_slope - slope_unit * curr_step
-        else:
-            test_slope = best_slope + slope_unit * curr_step
-
-        test_err = check_trend_line(support, pivot, test_slope, y)
-        if test_err < 0 or test_err >= best_err:
-            curr_step *= 0.5
-        else:
-            best_err = test_err
-            best_slope = test_slope
-            get_derivative = True
-
-        attempts += 1
-        if attempts > 100:
-            break
-
-    return (best_slope, -best_slope * pivot + y.iloc[pivot])
-
-# Function to fit trendlines (Support and Resistance)
-def fit_trendlines(high: pd.Series, low: pd.Series, close: pd.Series):
-    slope, intercept = np.polyfit(np.arange(len(close)), close, 1)
-
-    upper_pivot = high.idxmax()
-    lower_pivot = low.idxmin()
-
-    upper_pivot_pos = high.index.get_loc(upper_pivot)
-    lower_pivot_pos = low.index.get_loc(lower_pivot)
-
-    support_coefs = optimize_slope(True, lower_pivot_pos, slope, low)
-    resist_coefs = optimize_slope(False, upper_pivot_pos, slope, high)
-    return support_coefs, resist_coefs
+# Function to check if the support line is too close to another support line
+def is_line_too_close(new_support_price, existing_support_lines, buffer):
+    """Checks if the new support line is too close to any existing support lines."""
+    return any(abs(new_support_price - support) < buffer for support in existing_support_lines)
 
 # Streamlit Title
-st.title("Trading Strategy Optimization Using Technical Analysis")
+st.title("Candlestick Chart and Market Trend Analysis with Support Line Logic")
 
-# Read data1.csv (Use for both graphs)
+# Read data1.csv
 data1 = pd.read_csv('data1.csv')
 data1['date'] = pd.to_datetime(data1['date'], errors='coerce')
 data1 = data1.dropna(subset=['date'])  # Remove rows with invalid dates
 
-# Ensure numerical data types for high, low, close columns
-data1[['high', 'low', 'close']] = data1[['high', 'low', 'close']].astype(float)
+# Ensure numerical data types for high, low, close, and open columns
+data1[['open', 'high', 'low', 'close']] = data1[['open', 'high', 'low', 'close']].astype(float)
 
 # Get min and max dates from data1.csv
 min_date = data1['date'].min()
 max_date = data1['date'].max()
 
+# Initialize session state for storing the random date
+if 'random_date' not in st.session_state:
+    st.session_state.random_date = None
+
 # User Input for Date
 selected_date = st.date_input(
     "Select a date",
-    value=max_date.date(),
+    value=st.session_state.random_date.date() if st.session_state.random_date else max_date.date(),
     min_value=min_date.date(),
-    max_value=max_date.date()
+    max_value=max_date.date(),
+    key="selected_date"
 )
 
 # Add a button to select a random date
 if st.button("Select Random Date"):
-    random_date = pd.to_datetime(np.random.choice(pd.date_range(min_date, max_date).date))
-    selected_date = random_date
+    st.session_state.random_date = pd.to_datetime(np.random.choice(pd.date_range(min_date, max_date).date))
+    selected_date = st.session_state.random_date
     st.write(f"Random date selected: {selected_date.date()}")
+else:
+    if st.session_state.random_date:
+        selected_date = st.session_state.random_date
 
 selected_date = pd.to_datetime(selected_date)
 
@@ -131,8 +64,8 @@ selected_date = pd.to_datetime(selected_date)
 dates_in_data1 = data1['date']
 selected_date_in_data1 = get_previous_available_date(selected_date, dates_in_data1)
 
-# Analysis on data1.csv
-st.header("Market trend of the XAUUSD market using least square method")
+# First Graph: Market Trend Analysis using Linear Regression
+st.header("Market Trend of the XAUUSD Market using Least Squares Method")
 if selected_date_in_data1 is None:
     st.warning(f"No available date before or on {selected_date.date()} in data1.csv")
 else:
@@ -203,19 +136,27 @@ else:
             else:
                 st.info(f"The market is ranging from {start_date.date()} to {end_date.date()}. It is better to wait until a clear trend forms.")
 
-# Trendline Analysis (data1.csv) with Linear Regression
-st.header("Trendline Analysis with Linear Regression Line")
-lookback_days = st.number_input(
-    "Enter the number of days to include before the chosen date (for Trendline Analysis)",
-    min_value=1,
-    max_value=365,
-    value=61
+# Second Graph: Candlestick Chart with Support, Resistance, and Trendline Analysis
+st.header("Trendline Analysis with Support/Resistance Lines and Linear Regression")
+
+# User input for minimum distance between two support lines
+min_distance_between_supports = st.number_input(
+    "Enter the minimum distance between two support lines (e.g., 2% of price range):",
+    min_value=0.01,  # minimum value is 0.01 to avoid too small numbers
+    value=0.02  # default value is 2%
 )
 
 if selected_date_in_data1 is None:
     st.warning(f"No available date before or on {selected_date.date()} in data1.csv")
 else:
     selected_date_data1 = selected_date_in_data1
+    lookback_days = st.number_input(
+        "Enter the number of days to include before the chosen date (for Trendline Analysis)",
+        min_value=1,
+        max_value=365,
+        value=61,
+        key="lookback_days"
+    )
     start_date1 = selected_date_data1 - pd.Timedelta(days=lookback_days - 1)
     end_date1 = selected_date_data1
 
@@ -235,44 +176,67 @@ else:
         # Ensure numerical data types
         data1_filtered = data1_filtered.astype(float)
 
-        # Trendline fitting and plotting
-        candles = data1_filtered.copy()
+        # Prepare list to store lines and track support lines
+        lines = []
+        support_lines = []
 
-        # Ensure there are enough data points for trendline calculation
-        if len(candles) < 2:
-            st.warning(f"Not enough data to compute trendlines from {start_date1.date()} to {end_date1.date()}.")
-        else:
-            # Fit Support and Resistance trendlines
-            support_coefs, resist_coefs = fit_trendlines(candles['high'], candles['low'], candles['close'])
-            support_line = support_coefs[0] * np.arange(len(candles)) + support_coefs[1]
-            resist_line = resist_coefs[0] * np.arange(len(candles)) + resist_coefs[1]
+        # Variables to track state
+        red_candle_found = False
+        red_candle_high = None
+        red_candle_low = None
+        last_red_candle_low = None
 
-            # Calculate Linear Regression Line
-            x_vals = np.arange(len(candles))
-            slope, intercept = np.polyfit(x_vals, candles['close'], 1)
-            regression_line = slope * x_vals + intercept
+        # Iterate over the filtered data to find patterns
+        for i in range(2, len(data1_filtered)):
+            current_candle = data1_filtered.iloc[i]
+            previous_candle_1 = data1_filtered.iloc[i - 1]
+            previous_candle_2 = data1_filtered.iloc[i - 2]
 
-            # Prepare trendlines for plotting
-            alines = [
-                [(candles.index[i], support_line[i]) for i in range(len(candles))],
-                [(candles.index[i], resist_line[i]) for i in range(len(candles))],
-                [(candles.index[i], regression_line[i]) for i in range(len(candles))],  # Regression Line
-            ]
+            # Check for at least two consecutive green candles
+            if (previous_candle_1['close'] > previous_candle_1['open'] and
+                previous_candle_2['close'] > previous_candle_2['open']):
+                # Find a valid red candle after the green sequence
+                if current_candle['close'] < current_candle['open']:
+                    red_candle_found = True
+                    red_candle_high = current_candle['open']
+                    red_candle_low = current_candle['close']
+                    last_red_candle_low = red_candle_low  # Store the low of this red candle
+                    continue  # Move to the next candle to look for the green one
 
-            # Plot the candlestick chart with trendlines and linear regression line
-            fig, axlist = mpf.plot(
-                candles,
-                type='candle',
-                alines=dict(alines=alines, colors=['green', 'red', 'blue']),  # Blue for Regression Line
-                style='charles',
-                title=f"Candlestick with Support, Resistance, and Regression Line from {start_date1.date()} to {end_date1.date()}",
-                figsize=(20, 12),  # Increase figure size for better visibility
-                returnfig=True
-            )
+            # If another red candle is found after the first, update the red candle tracking
+            if red_candle_found and current_candle['close'] < current_candle['open']:
+                red_candle_high = current_candle['open']
+                red_candle_low = current_candle['close']
+                last_red_candle_low = red_candle_low  # Update to the most recent red candle
 
-            # Use Streamlit's columns to center the graph
-            col1, col2, col3 = st.columns([0.5, 4, 0.5])  # Center the graph in the middle column
-            with col2:
-                st.pyplot(fig)
+            # Once a red candle is found, look for the next green candle that breaks its high
+            if red_candle_found:
+                if current_candle['close'] > current_candle['open'] and current_candle['close'] > red_candle_high:
+                    # Check if the support line is too close to another support line
+                    if not is_line_too_close(last_red_candle_low, support_lines, min_distance_between_supports):
+                        # Add the green horizontal line at the low of the most recent red candle's body
+                        lines.append(mpf.make_addplot([last_red_candle_low]*len(data1_filtered), color='green', linestyle='--'))
+                        support_lines.append(last_red_candle_low)  # Store the support line
+                        st.write(f"Green line drawn at {last_red_candle_low} from the red candle on {data1_filtered.index[i-1].date()}.")
+                    red_candle_found = False  # Reset the red candle tracking
 
+        # If no green candle breaks the red candle's high, draw the line on the low of the last red candle
+        if red_candle_found and last_red_candle_low:
+            if not is_line_too_close(last_red_candle_low, support_lines, min_distance_between_supports):
+                lines.append(mpf.make_addplot([last_red_candle_low]*len(data1_filtered), color='green', linestyle='--'))
+                support_lines.append(last_red_candle_low)
+                st.write(f"Green line drawn at {last_red_candle_low} from the last red candle's low.")
 
+        # Plot the candlestick chart with the trendlines and regression line
+        fig, axlist = mpf.plot(
+            data1_filtered,
+            type='candle',
+            style='charles',
+            title=f"Candlestick with Support, Resistance, and Regression Line from {start_date1.date()} to {end_date1.date()}",
+            figsize=(10, 6),
+            returnfig=True,
+            addplot=lines if lines else None  # Add support lines if they exist
+        )
+
+        # Display the plot in Streamlit
+        st.pyplot(fig)
